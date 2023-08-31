@@ -1,0 +1,45 @@
+heat_template_version: wallaby
+
+description: Create tenant network, subnet, and router
+
+resources:
+  admin-internal-network:
+    type: OS::Neutron::Net
+    properties:
+      name: admin-internal
+
+  admin-internal-subnet:
+    type: OS::Neutron::Subnet
+    properties:
+      network_id: { get_resource: admin-internal-network }
+      cidr: 192.168.122.0/24
+      enable_dhcp: true
+      allocation_pools:
+      - start: 192.168.122.5
+        end: 192.168.122.200
+
+      dns_nameservers:
+        - 172.18.42.10
+        - 172.18.42.11
+
+  admin-router:
+    type: OS::Neutron::Router
+    properties:
+      external_gateway_info:
+        network: ext-net
+
+  admin-internal-svi:
+    type: OS::Neutron::Port
+    depends_on: admin-internal-network
+    properties:
+      network: { get_resource: admin-internal-network }
+      fixed_ips:
+        - ip_address: 192.168.122.1
+
+  router-interface:
+    type: OS::Neutron::RouterInterface
+    depends_on: [admin-internal-svi, admin-router]
+    properties:
+      router: { get_resource: admin-router }
+      port: { get_resource: admin-internal-svi }
+

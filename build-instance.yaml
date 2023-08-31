@@ -1,0 +1,131 @@
+heat_template_version: wallaby
+
+description: Deploy a single instance
+
+parameters:
+  public_network:
+    type: string
+    default: ext-net
+  image:
+    type: string
+    default: 'rhel-9.2'
+  flavor:
+    type: string
+    default: 'g1.2xlarge'
+  ssh_key:
+    type: string
+    description: 'your ssh pubkey data'
+    default: 'ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQC7nkyjjCCndoEesZl/ENRJBrmP3qNGU2BPk3i679E8mvzFQL7zxRZSxAd4sXvLSQOD5+q1/Dzk9hhWHLWA8S0R2hEPPMCGPDfoKU24WCGfp6r70fhzd/2Krd5jcYDMM7ys/gZuyIiwxNIzmWtLEUeozbLqjxBtRMSDW8txd3WbZPFPQR+BIWy6iseTUlZe12EBEK/34916MkdDnSl3hd2Q4PRASqTF1sjpaKMF2415XOu78ms2zG/3jD2ITKGvQaScPkusySkGfAMPe0cnCjERzwT2wd9WSzWNgQWPVTJ5lixQKmRmKG7Y0hpAFr2d9Oe5iXMEc8COZV082jxyKpMCaswwd6vqSOB47VQV7M9IDM2LNmbqoeAutOWkuuaWME5s3gkT1CAPk78dTCnKHwrefNZTBBKOtmwjRv88NfkA8Zmmg9I4FCh2zxeIlFc6SUWsR8d6tbGrOQHK+cs9bVpsY+47lghGzH7tFCR2GtvTxtib9NLX93HB27hfGFqt3e0='
+  net:
+    type: string
+    default: 'admin-internal'
+  sg:
+    type: string
+    description: 'comma separated list of sg names or ids'
+    default: 'default'
+  instance_user:
+    type: string
+    description: 'custom admin user for ssh since RHEL9/FC dont allow remote root by default'
+    default: 'greg'
+
+resources:
+
+  build_key:
+    type: OS::Nova::KeyPair
+    properties:
+      name:
+        list_join: [ '-', [ { get_param: "OS::stack_name" }, 'build-ssh-key' ]]
+      public_key: { get_param: ssh_key }
+
+  port:
+    type: OS::Neutron::Port
+    properties:
+      network: { get_param: net }
+      security_groups:
+        str_split: [ ',', { get_param: sg } ]
+
+  fip:
+    type: OS::Neutron::FloatingIP
+    depends_on: [ port ]
+    properties:
+      floating_network: { get_param: public_network }
+      port_id: { get_resource: port }
+
+  host:
+    type: OS::Nova::Server
+    depends_on: [ cloud-init-config ]
+    properties:
+      name: { get_param: "OS::stack_name" }
+      user_data_format: RAW
+      user_data: { get_resource: cloud-init-config }    
+      image: { get_param: image } 
+      flavor: { get_param: flavor }
+      networks:
+        - port: { get_resource: port }
+
+  volume_50GB:
+    type: OS::Cinder::Volume
+    properties:
+      size: 50
+      volume_type: rhcs6-gp2
+      name:
+        list_join: [ '-', [ { get_param: "OS::stack_name" },  'rhcs6-gp2-50gb' ]]
+
+  volume_200GB:
+    type: OS::Cinder::Volume
+    properties:
+      size: 200
+      volume_type: rhcs6-gp2
+      name:
+        list_join: [ '-', [ { get_param: "OS::stack_name" },  'rhcs6-gp2-200gb' ]]
+
+  volume_32GB:
+    type: OS::Cinder::Volume
+    properties:
+      size: 32
+      volume_type: rhcs6-gp3
+      name:
+        list_join: [ '-', [ { get_param: "OS::stack_name" },  'rhcs6-gp3-32gb' ]]
+
+  attach_volume_50GB:
+    type: OS::Cinder::VolumeAttachment
+    depends_on: [ host ]
+    properties:
+      instance_uuid: { get_resource: host }
+      volume_id: { get_resource: volume_50GB }
+
+  attach_volume_200GB:
+    type: OS::Cinder::VolumeAttachment
+    depends_on:
+      - host
+      - attach_volume_50GB
+    properties:
+      instance_uuid: { get_resource: host }
+      volume_id: { get_resource: volume_200GB }
+
+  attach_volume_32GB:
+    type: OS::Cinder::VolumeAttachment
+    depends_on:
+      - host
+      - attach_volume_50GB
+      - attach_volume_200GB
+    properties:
+      instance_uuid: { get_resource: host }
+      volume_id: { get_resource: volume_32GB }
+
+  cloud-init-config:
+   # cloud init resource
+   type: OS::Heat::CloudConfig
+   properties:
+    cloud_config:
+      manage_etc_hosts: true
+      users:
+        - name: { get_param: instance_user }
+          gecos: { get_param: instance_user } login account
+          sudo: ALL=(ALL) NOPASSWD:ALL
+          shell: /bin/bash
+          lock-passwd: false
+          # RHEL / Fedora dont let you log in as root directly anymore
+          # so we cant set key_name in OS::Nova::Server directly
+          ssh-authorized-keys: { get_attr: [ build_key, public_key ] }
+          
