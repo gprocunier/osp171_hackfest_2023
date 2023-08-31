@@ -1,0 +1,54 @@
+--- /dev/null 2023-06-20 21:57:46.000000000 +0000
++++ /usr/lib/python3.9/site-packages/nova/virt/libvirt/config.py 2023-08-31 17:01:22.167944281 +0000
+@@ -1058,6 +1058,7 @@
+         self.driver_discard = None
+         self.driver_io = None
+         self.driver_iommu = False
++        self.driver_iothread = None
+         self.source_path = None
+         self.source_protocol = None
+         self.source_name = None
+@@ -1177,6 +1178,8 @@
+                 drv.set("io", self.driver_io)
+             if self.driver_iommu:
+                 drv.set("iommu", "on")
++            if self.driver_iothread is not None:
++                drv.set("iothread", str(self.driver_iothread))
+             dev.append(drv)
+
+         if self.source_type == "file":
+@@ -1258,6 +1261,8 @@
+                 self.driver_discard = c.get('discard')
+                 self.driver_io = c.get('io')
+                 self.driver_iommu = c.get('iommu', '') == "on"
++                if self.driver_io == 'threads':
++                  self.driver_iothread = int(c.get('iothread'))
+             elif c.tag == 'source':
+                 if self.source_type == 'file':
+                     self.source_path = c.get('file')
+@@ -2798,6 +2803,7 @@
+         self.cpuset = None
+         self.cpu = None
+         self.cputune = None
++        self.iothreads = None
+         self.features = []
+         self.clock = None
+         self.sysinfo = None
+@@ -2968,6 +2974,9 @@
+         if self.cpu is not None:
+             root.append(self.cpu.format_dom())
+
++        if self.iothreads is not None:
++            root.append(self._text_node("iothreads", str(self.iothreads)))
++
+         self._format_devices(root)
+
+         self._format_idmaps(root)
+@@ -3083,6 +3092,8 @@
+                         self.add_perf_event(p.get('name'))
+             elif c.tag == 'os':
+                 self._parse_os(c)
++            elif c.tag == 'iothreads':
++                self.iothreads = int(c.text)
+             else:
+                 self._parse_basic_props(c)
